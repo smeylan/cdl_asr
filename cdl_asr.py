@@ -64,7 +64,8 @@ def transcribe_with_ngram_model(files, lm_path, asr_model):
     input_tensor=False)
 
     beam_results_tuple = beam_search_lm.forward(log_probs = np.expand_dims(probs, axis=0), log_probs_length=None)[0]
-    beam_results_df = pd.DataFrame({'hypothesis':[x[1] for x in beam_results_tuple] ,'score':[x[0] for x in beam_results_tuple]})
+    beam_results_df = pd.DataFrame({'hypothesis':[x[1] for x in beam_results_tuple] ,'ngram_prob':[-1. * x[0] for x in beam_results_tuple]})
+    beam_results_df = beam_results_df.sort_values(by=['ngram_prob'])
     return(beam_results_df)
 
 def mask_each(text, tokenizer):
@@ -131,14 +132,19 @@ def compute_prob_for_all_masks(hypothesis, bertMaskedLM, vocab, tokenizer,  retu
 def compute_prob_for_all_hypotheses(all_hypotheses, bertMaskedLM, vocab, tokenizer):
     '''Complute the pseudo log likelihoods for all hypothesized utterance interpretations''' 
 
-    scores = [compute_prob_for_all_masks(hypothesis, bertMaskedLM, vocab, tokenizer, return_type='prob') for hypothesis in all_hypotheses]
-    rdf = pd.DataFrame({"hypothesis": all_hypotheses, "score":scores})
-    rdf = rdf.sort_values(by='score')
-    return(rdf)
+    all_hypotheses['bert_prob'] = [compute_prob_for_all_masks(hypothesis, bertMaskedLM, vocab, tokenizer, return_type='prob') for hypothesis in all_hypotheses.hypothesis]
+    
+    return(all_hypotheses)
 
 
-def transcribe_with_neural_rescoring(files, lm_path, asr_model, bertMaskedLM, vocab, tokenizer):
+def transcribe_with_neural_rescoring(files, lm_path, asr_model, bertMaskedLM, vocab, tokenizer, num_hypotheses, alpha, rescore=True):
     all_hypotheses = transcribe_with_ngram_model(files, lm_path, asr_model)
-    rescored_hypotheses = compute_prob_for_all_hypotheses(all_hypotheses.hypothesis, bertMaskedLM, vocab, tokenizer)
-    return(rescored_hypotheses)
-
+    
+    if rescore:
+        selected_hypotheses = all_hypotheses.sort_values(by=['ngram_prob'])[0:num_hypotheses]
+        rescored_hypotheses = compute_prob_for_all_hypotheses(selected_hypotheses, bertMaskedLM, vocab, tokenizer)
+        rescored_hypotheses['interpolated_prob'] = (1. - alpha) * rescored_hypotheses['ngram_prob'] + alpha * rescored_hypotheses['bert_prob']
+        rescored_hypotheses = rescored_hypotheses.sort_values(by=['interpolated_prob'])
+        return(rescored_hypotheses)
+    else:
+        return(all_hypotheses)
