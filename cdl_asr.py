@@ -58,7 +58,7 @@ def transcribe_with_ngram_model(files, lm_path, asr_model):
     beam_search_lm = nemo_asr.modules.BeamSearchDecoderWithLM(
         vocab=list(asr_model.decoder.vocabulary),
         beam_width=256,
-        alpha=2, beta=1.5,
+        alpha=10, beta=1.5,
         lm_path=lm_path,
         num_cpus=max(os.cpu_count(), 1),
     input_tensor=False)
@@ -139,9 +139,11 @@ def compute_prob_for_all_hypotheses(all_hypotheses, bertMaskedLM, vocab, tokeniz
 
 def transcribe_with_neural_rescoring(files, lm_path, asr_model, bertMaskedLM, vocab, tokenizer, num_hypotheses, alpha, rescore=True):
     all_hypotheses = transcribe_with_ngram_model(files, lm_path, asr_model)
+    all_hypotheses = all_hypotheses.sort_values(by=['ngram_prob'])
+    print('Best hypothesis after ngram: '+all_hypotheses.iloc[0].hypothesis)
     
     if rescore:
-        selected_hypotheses = all_hypotheses.sort_values(by=['ngram_prob'])[0:num_hypotheses]
+        selected_hypotheses = all_hypotheses[0:num_hypotheses]
         rescored_hypotheses = compute_prob_for_all_hypotheses(selected_hypotheses, bertMaskedLM, vocab, tokenizer)
         rescored_hypotheses['interpolated_prob'] = (1. - alpha) * rescored_hypotheses['ngram_prob'] + alpha * rescored_hypotheses['bert_prob']
         rescored_hypotheses = rescored_hypotheses.sort_values(by=['interpolated_prob'])
